@@ -38,34 +38,34 @@ class Solution:
 
         def pad_image_one_side(img, amount, side):
             if side == 'l':
-                img = np.stack(
-                    [np.pad(img[:, :, c], ((0, 0), (amount, 0)), mode='constant', constant_values=0) for c in range(img.shape[-1])],
-                    axis=2)
+                amount_padding = (amount, 0)
             else:
-                img = np.stack(
-                    [np.pad(img[:, :, c], ((0, 0), (0, amount)), mode='constant', constant_values=0) for c in range(img.shape[-1])],
-                    axis=2)
-            return img
+                amount_padding = (0, amount)
+            img = np.stack(
+                [np.pad(img[:, :, c], ((0, 0), amount_padding), mode='constant', constant_values=0) for c in
+                 range(img.shape[-1])],
+                axis=2)
+            return img, amount_padding
 
-        def pad_image(img, pad):
-            img = np.pad(img, pad, mode='constant', constant_values=0)
-            return img
+        def pad_image(img, pad, amount_padding):
+            x_pad = np.array((pad, pad)) - np.array(amount_padding).clip(0, None)
+            x_pad_cliped = np.clip(x_pad, a_min=0, a_max=None)
+            img = np.pad(img, ((pad, pad), x_pad_cliped), mode='constant', constant_values=0)
+            return img, x_pad
 
         def disperity_shift_diff(left_image, right_image, dsp):
             if dsp > 0:
-                left_image_shifted = pad_image_one_side(left_image, dsp, 'r')
-                right_image_shifted = pad_image_one_side(right_image, dsp, 'l')
+                left_image_shifted, amount_padding = pad_image_one_side(left_image, dsp, 'l')
+                right_image_shifted, _ = pad_image_one_side(right_image, dsp, 'r')
             elif dsp < 0:
-                left_image_shifted = pad_image_one_side(left_image, -1 * dsp, 'l')
-                right_image_shifted = pad_image_one_side(right_image, -1 * dsp, 'r')
+                left_image_shifted, amount_padding = pad_image_one_side(left_image, -1 * dsp, 'r')
+                right_image_shifted, _ = pad_image_one_side(right_image, -1 * dsp, 'l')
             else:
                 left_image_shifted, right_image_shifted = left_image, right_image
+                amount_padding = (0, 0)
             diff = (left_image_shifted - right_image_shifted) ** 2
             diff = diff.sum(axis=-1)
-            if dsp > 0:
-                return diff[:, :diff.shape[1] - dsp]
-            else:
-                return diff[:, -1 * dsp:]
+            return diff, amount_padding
 
         def strided_view(A, kernel_size, stride):
             output_shape = ((A.shape[0] - kernel_size) // stride + 1,
@@ -79,9 +79,11 @@ class Solution:
 
         def calc_disperity(left_image, right_image, win_size, dsp):
             padding_size = int(np.floor(win_size / 2))
-            diff = disperity_shift_diff(left_image, right_image, dsp)
-            padded_diff = pad_image(diff, padding_size)
+            diff, amount_padding = disperity_shift_diff(left_image, right_image, dsp)
+            padded_diff, padding = pad_image(diff, padding_size, amount_padding)
+            l, r = np.clip(padding, None, 0) * -1
             sum_pool = strided_view(padded_diff, win_size, 1).sum(axis=(2, 3))
+            sum_pool = sum_pool[:, l:sum_pool.shape[1] - r]
             return sum_pool
 
         ssdd_tensor = np.stack([calc_disperity(left_image, right_image, win_size, d) for d in disparity_values], axis=-1)
@@ -107,9 +109,8 @@ class Solution:
         Returns:
             Naive labels HxW matrix.
         """
-        # you can erase the label_no_smooth initialization.
-        label_no_smooth = np.zeros((ssdd_tensor.shape[0], ssdd_tensor.shape[1]))
         """INSERT YOUR CODE HERE"""
+        label_no_smooth = ssdd_tensor.argmin(axis=-1)
         return label_no_smooth
 
     @staticmethod
@@ -131,6 +132,23 @@ class Solution:
         num_labels, num_of_cols = c_slice.shape[0], c_slice.shape[1]
         l_slice = np.zeros((num_labels, num_of_cols))
         """INSERT YOUR CODE HERE"""
+        l_slice[:, 0] = c_slice[:, 0]
+        b_indexs = np.arange(1, l_slice.shape[0] + 1)
+
+        l_slice = np.pad(l_slice, ((1, 1), (0, 0)), mode='constant', constant_values=np.inf)
+
+        def fill_L(k):
+            a = l_slice[:, k - 1][b_indexs]
+            b = np.min((l_slice[:, k - 1][b_indexs + 1], l_slice[:, k - 1][b_indexs - 1]), axis=0) + p1
+            c_min_val = np.ones_like(b_indexs) * l_slice[:, k - 1].min()
+            c = c_min_val + p2
+            l_slice[1:-1, k] = np.min((a, b, c), axis=0) + c_slice[:, k] - c_min_val
+
+        for k in range(1, l_slice.shape[1]):
+            fill_L(k)
+
+        l_slice = l_slice[1:-1, :]
+
         return l_slice
 
     def dp_labeling(self,
@@ -156,6 +174,11 @@ class Solution:
         """
         l = np.zeros_like(ssdd_tensor)
         """INSERT YOUR CODE HERE"""
+        for i in range(ssdd_tensor.shape[0]):
+            c_slice = ssdd_tensor[i, :, :].T
+            L = self.dp_grade_slice(c_slice, p1, p2)
+            l[i] = L.T
+
         return self.naive_labeling(l)
 
     def dp_labeling_per_direction(self,
