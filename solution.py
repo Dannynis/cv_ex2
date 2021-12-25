@@ -240,5 +240,51 @@ class Solution:
         num_of_directions = 8
         l = np.zeros_like(ssdd_tensor)
         """INSERT YOUR CODE HERE"""
+
+        def flipper(x):
+            return [np.fliplr(x) for x in x]
+
+        def diagonolize(ssdd):
+            longer_axis = max(ssdd.shape[1], ssdd.shape[0])
+            diags = [ssdd.diagonal(i) for i in range(-longer_axis, longer_axis)]
+            return diags
+
+        def undiagonlize(orig_ssdd_shape, diags):
+            xv, yv = np.meshgrid(range(orig_ssdd_shape[1]), range(orig_ssdd_shape[0]), sparse=False, indexing='ij')
+            inds = np.stack([xv, yv]).T
+            longer_axis = max(orig_ssdd_shape)
+            diags_inds = np.concatenate([inds.diagonal(i) for i in range(-longer_axis, longer_axis)], axis=1)
+            diags_c = np.concatenate(diags, axis=1)
+            z = np.zeros(orig_ssdd_shape)
+            z[diags_inds[1], diags_inds[0]] = diags_c.T
+            return z
+
+        def directions_slices(ssdd):
+            d1 = [ssdd[i].T for i in range(ssdd.shape[0])]
+            d2 = diagonolize(ssdd)
+            d3 = [ssdd[:, i].T for i in range(ssdd.shape[1])]
+            d4 = diagonolize(np.fliplr(ssdd))
+            d5, d6, d7, d8 = map(flipper, [d1, d2, d3, d4])
+            return [d1, d2, d3, d4, d5, d6, d7, d8]
+
+        graded_direction = []
+        for direction_slices in directions_slices(ssdd_tensor):
+            graded_slices = []
+            for c_slice in direction_slices:
+                if c_slice.shape[1] > 0:
+                    graded_slices.append(self.dp_grade_slice(c_slice, p1, p2))
+            graded_direction.append(graded_slices)
+
+        d1_l = np.stack(list(map(np.transpose, graded_direction[0])))
+        d2_l = undiagonlize(ssdd_tensor.shape, graded_direction[1])
+        d3_l = np.stack(list(map(np.transpose, graded_direction[2]))).transpose(1, 0, 2)
+        d4_l = np.fliplr(undiagonlize(ssdd_tensor.shape, graded_direction[3]))
+        d5_l = np.fliplr(list(map(np.transpose, graded_direction[4])))
+        d6_l = undiagonlize(ssdd_tensor.shape, flipper(graded_direction[5]))
+        d7_l = np.stack(list(map(np.transpose, flipper(graded_direction[6])))).transpose(1, 0, 2)
+        d8_l = np.fliplr(undiagonlize(ssdd_tensor.shape, flipper(graded_direction[7])))
+
+        l = np.mean([d1_l,d2_l,d3_l,d4_l,d5_l,d6_l,d7_l,d8_l],axis=0)
+
         return self.naive_labeling(l)
 

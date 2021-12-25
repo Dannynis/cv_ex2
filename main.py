@@ -49,6 +49,7 @@ def load_data(is_your_data=False):
 
 
 def main():
+    global  WIN_SIZE,DISPARITY_RANGE
     left_image, right_image = load_data()
     solution = Solution()
     # Compute Sum-Square-Diff distance
