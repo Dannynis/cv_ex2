@@ -49,7 +49,7 @@ def load_data(is_your_data=False):
 
 
 def main():
-    global  WIN_SIZE,DISPARITY_RANGE
+    global WIN_SIZE,DISPARITY_RANGE,COST1,COST2
     left_image, right_image = load_data()
     solution = Solution()
     # Compute Sum-Square-Diff distance
@@ -154,9 +154,9 @@ def main():
     ###########################################################################
     ########################### YOUR IMAGE PLAYGROUND #########################
     ###########################################################################
-    COST1 = 0.5           # YOU MAY CHANGE THIS
-    COST2 = 3.0           # YOU MAY CHANGE THIS
-    WIN_SIZE = 3          # YOU MAY CHANGE THIS
+    COST1 = 0.1           # YOU MAY CHANGE THIS
+    COST2 = 0.3           # YOU MAY CHANGE THIS
+    WIN_SIZE = 4          # YOU MAY CHANGE THIS
     DISPARITY_RANGE = 20  # YOU MAY CHANGE THIS
 
     your_left_image, your_right_image = load_data(is_your_data=True)

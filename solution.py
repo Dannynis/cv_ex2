@@ -47,10 +47,16 @@ class Solution:
                 axis=2)
             return img, amount_padding
 
-        def pad_image(img, pad, amount_padding):
-            x_pad = np.array((pad, pad)) - np.array(amount_padding).clip(0, None)
+        def pad_image(img, pad, amount_padding, even_win):
+            if even_win:
+                x_pad = np.array((pad, pad - 1)) - np.array(amount_padding).clip(0, None)
+            else:
+                x_pad = np.array((pad, pad)) - np.array(amount_padding).clip(0, None)
             x_pad_cliped = np.clip(x_pad, a_min=0, a_max=None)
-            img = np.pad(img, ((pad, pad), x_pad_cliped), mode='constant', constant_values=0)
+            if even_win:
+                img = np.pad(img, ((pad, pad - 1), x_pad_cliped), mode='constant', constant_values=0)
+            else:
+                img = np.pad(img, ((pad, pad), x_pad_cliped), mode='constant', constant_values=0)
             return img, x_pad
 
         def disperity_shift_diff(left_image, right_image, dsp):
@@ -78,9 +84,10 @@ class Solution:
             return A_w
 
         def calc_disperity(left_image, right_image, win_size, dsp):
+            even_win = (win_size % 2 == 0)
             padding_size = int(np.floor(win_size / 2))
             diff, amount_padding = disperity_shift_diff(left_image, right_image, dsp)
-            padded_diff, padding = pad_image(diff, padding_size, amount_padding)
+            padded_diff, padding = pad_image(diff, padding_size, amount_padding, even_win)
             l, r = np.clip(padding, None, 0) * -1
             sum_pool = strided_view(padded_diff, win_size, 1).sum(axis=(2, 3))
             sum_pool = sum_pool[:, l:sum_pool.shape[1] - r]
@@ -213,7 +220,13 @@ class Solution:
         l = np.zeros_like(ssdd_tensor)
         direction_to_slice = {}
         """INSERT YOUR CODE HERE"""
+        directions_results = dp_score_all_directions(ssdd_tensor, p1, p2)
+
+        for i in range(num_of_directions):
+            direction_to_slice[i+1] = self.naive_labeling(directions_results[i])
+
         return direction_to_slice
+
 
     def sgm_labeling(self, ssdd_tensor: np.ndarray, p1: float, p2: float):
         """Estimate the depth map according to the SGM algorithm.
@@ -241,50 +254,58 @@ class Solution:
         l = np.zeros_like(ssdd_tensor)
         """INSERT YOUR CODE HERE"""
 
-        def flipper(x):
-            return [np.fliplr(x) for x in x]
-
-        def diagonolize(ssdd):
-            longer_axis = max(ssdd.shape[1], ssdd.shape[0])
-            diags = [ssdd.diagonal(i) for i in range(-longer_axis, longer_axis)]
-            return diags
-
-        def undiagonlize(orig_ssdd_shape, diags):
-            xv, yv = np.meshgrid(range(orig_ssdd_shape[1]), range(orig_ssdd_shape[0]), sparse=False, indexing='ij')
-            inds = np.stack([xv, yv]).T
-            longer_axis = max(orig_ssdd_shape)
-            diags_inds = np.concatenate([inds.diagonal(i) for i in range(-longer_axis, longer_axis)], axis=1)
-            diags_c = np.concatenate(diags, axis=1)
-            z = np.zeros(orig_ssdd_shape)
-            z[diags_inds[1], diags_inds[0]] = diags_c.T
-            return z
-
-        def directions_slices(ssdd):
-            d1 = [ssdd[i].T for i in range(ssdd.shape[0])]
-            d2 = diagonolize(ssdd)
-            d3 = [ssdd[:, i].T for i in range(ssdd.shape[1])]
-            d4 = diagonolize(np.fliplr(ssdd))
-            d5, d6, d7, d8 = map(flipper, [d1, d2, d3, d4])
-            return [d1, d2, d3, d4, d5, d6, d7, d8]
-
-        graded_direction = []
-        for direction_slices in directions_slices(ssdd_tensor):
-            graded_slices = []
-            for c_slice in direction_slices:
-                if c_slice.shape[1] > 0:
-                    graded_slices.append(self.dp_grade_slice(c_slice, p1, p2))
-            graded_direction.append(graded_slices)
-
-        d1_l = np.stack(list(map(np.transpose, graded_direction[0])))
-        d2_l = undiagonlize(ssdd_tensor.shape, graded_direction[1])
-        d3_l = np.stack(list(map(np.transpose, graded_direction[2]))).transpose(1, 0, 2)
-        d4_l = np.fliplr(undiagonlize(ssdd_tensor.shape, graded_direction[3]))
-        d5_l = np.fliplr(list(map(np.transpose, graded_direction[4])))
-        d6_l = undiagonlize(ssdd_tensor.shape, flipper(graded_direction[5]))
-        d7_l = np.stack(list(map(np.transpose, flipper(graded_direction[6])))).transpose(1, 0, 2)
-        d8_l = np.fliplr(undiagonlize(ssdd_tensor.shape, flipper(graded_direction[7])))
+        d1_l, d2_l, d3_l, d4_l, d5_l, d6_l, d7_l, d8_l = dp_score_all_directions(ssdd_tensor, p1, p2)
 
         l = np.mean([d1_l,d2_l,d3_l,d4_l,d5_l,d6_l,d7_l,d8_l],axis=0)
 
         return self.naive_labeling(l)
 
+
+def flipper(x):
+    return [np.fliplr(x) for x in x]
+
+
+def diagonolize(ssdd):
+    longer_axis = max(ssdd.shape[1], ssdd.shape[0])
+    diags = [ssdd.diagonal(i) for i in range(-longer_axis, longer_axis)]
+    return diags
+
+
+def undiagonlize(orig_ssdd_shape, diags):
+    xv, yv = np.meshgrid(range(orig_ssdd_shape[1]), range(orig_ssdd_shape[0]), sparse=False, indexing='ij')
+    inds = np.stack([xv, yv]).T
+    longer_axis = max(orig_ssdd_shape)
+    diags_inds = np.concatenate([inds.diagonal(i) for i in range(-longer_axis, longer_axis)], axis=1)
+    diags_c = np.concatenate(diags, axis=1)
+    z = np.zeros(orig_ssdd_shape)
+    z[diags_inds[1], diags_inds[0]] = diags_c.T
+    return z
+
+
+def directions_slices(ssdd):
+    d1 = [ssdd[i].T for i in range(ssdd.shape[0])]
+    d2 = diagonolize(ssdd)
+    d3 = [ssdd[:, i].T for i in range(ssdd.shape[1])]
+    d4 = diagonolize(np.fliplr(ssdd))
+    d5, d6, d7, d8 = map(flipper, [d1, d2, d3, d4])
+    return [d1, d2, d3, d4, d5, d6, d7, d8]
+
+
+def dp_score_all_directions(ssdd_tensor, p1, p2):
+    graded_direction = []
+    for direction_slices in directions_slices(ssdd_tensor):
+        graded_slices = []
+        for c_slice in direction_slices:
+            if c_slice.shape[1] > 0:
+                graded_slices.append(Solution.dp_grade_slice(c_slice, p1, p2))
+        graded_direction.append(graded_slices)
+
+    d1_l = np.stack(list(map(np.transpose, graded_direction[0])))
+    d2_l = undiagonlize(ssdd_tensor.shape, graded_direction[1])
+    d3_l = np.stack(list(map(np.transpose, graded_direction[2]))).transpose(1, 0, 2)
+    d4_l = np.fliplr(undiagonlize(ssdd_tensor.shape, graded_direction[3]))
+    d5_l = np.fliplr(list(map(np.transpose, graded_direction[4])))
+    d6_l = undiagonlize(ssdd_tensor.shape, flipper(graded_direction[5]))
+    d7_l = np.stack(list(map(np.transpose, flipper(graded_direction[6])))).transpose(1, 0, 2)
+    d8_l = np.fliplr(undiagonlize(ssdd_tensor.shape, flipper(graded_direction[7])))
+    return d1_l, d2_l, d3_l, d4_l, d5_l, d6_l, d7_l, d8_l
